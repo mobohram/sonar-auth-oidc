@@ -18,4 +18,4 @@
 @ParametersAreNonnullByDefault
 package org.vaulttec.sonarqube.auth.oidc;
 
-import javax.annotation.ParametersAreNonnullByDefault;
+import jakarta.annotation.ParametersAreNonnullByDefault;

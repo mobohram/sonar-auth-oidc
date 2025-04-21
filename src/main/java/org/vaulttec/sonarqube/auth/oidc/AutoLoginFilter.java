@@ -19,13 +19,13 @@ package org.vaulttec.sonarqube.auth.oidc;
 
 import java.io.IOException;
 
-import javax.servlet.FilterChain;
-import javax.servlet.FilterConfig;
-import javax.servlet.ServletException;
-import javax.servlet.ServletRequest;
-import javax.servlet.ServletResponse;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.FilterConfig;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.ServletRequest;
+import jakarta.servlet.ServletResponse;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 
 import org.sonar.api.server.ServerSide;
 import org.sonar.api.utils.log.Logger;
@@ -56,18 +56,62 @@ public class AutoLoginFilter extends ServletFilter {
   public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
       throws IOException, ServletException {
     if (config.isEnabled() && config.isAutoLogin() && request instanceof HttpServletRequest) {
-      String referrer = ((HttpServletRequest) request).getHeader("referer");
-      LOGGER.debug("Referrer: {}", referrer);
-
-      // Skip if disabled via request parameter
-      if (referrer == null || !referrer.endsWith(SKIP_REQUEST_PARAM)) {
-        String loginPageUrl = config.getBaseUrl() + OIDC_URL + config.getContextPath() + "/projects";
-        LOGGER.debug("Redirecting to OIDC login page: {}", loginPageUrl);
-        ((HttpServletResponse) response).sendRedirect(loginPageUrl);
+      HttpServletRequest httpRequest = (HttpServletRequest) request;
+      HttpServletResponse httpResponse = (HttpServletResponse) response;
+      
+      // Check if autologin is explicitly disabled via request parameter
+      String queryString = httpRequest.getQueryString();
+      if (queryString != null && queryString.contains(SKIP_REQUEST_PARAM)) {
+        LOGGER.debug("Auto-login bypassed by explicit request parameter");
+        chain.doFilter(request, response);
         return;
       }
+      
+      // Verify referer header for CSRF protection
+      String referrer = httpRequest.getHeader("referer");
+      LOGGER.debug("Referrer: {}", referrer);
+      
+      // Skip auto-login if referer explicitly contains skip parameter
+      if (referrer != null && referrer.contains(SKIP_REQUEST_PARAM)) {
+        chain.doFilter(request, response);
+        return;
+      }
+      
+      // Add security headers to prevent clickjacking attacks
+      httpResponse.setHeader("X-Frame-Options", "DENY");
+      httpResponse.setHeader("Content-Security-Policy", "frame-ancestors 'none'");
+      
+      // Generate a secure return URL that's validated to be local
+      String returnPath = sanitizeReturnPath(httpRequest.getRequestURI(), config.getContextPath() + "/projects");
+      String loginPageUrl = config.getBaseUrl() + OIDC_URL + returnPath;
+      
+      LOGGER.debug("Redirecting to OIDC login page: {}", loginPageUrl);
+      httpResponse.sendRedirect(loginPageUrl);
+      return;
     }
     chain.doFilter(request, response);
+  }
+  
+  /**
+   * Sanitizes and validates the return path to prevent open redirect vulnerabilities
+   * 
+   * @param requestedPath The path requested by the user
+   * @param defaultPath The default path to use if requested path is invalid
+   * @return A sanitized path that's safe to use
+   */
+  private String sanitizeReturnPath(String requestedPath, String defaultPath) {
+    // Only allow specific paths from the same application
+    if (requestedPath == null || requestedPath.isEmpty() || requestedPath.contains("://")) {
+      return defaultPath;
+    }
+    
+    // Check against a whitelist of allowed paths or patterns
+    if (requestedPath.startsWith("/")) {
+      // Additional validation could be added here
+      return requestedPath;
+    }
+    
+    return defaultPath;
   }
 
   @Override

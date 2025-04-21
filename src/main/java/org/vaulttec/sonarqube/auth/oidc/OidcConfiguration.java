@@ -28,7 +28,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 
-import javax.annotation.CheckForNull;
+import jakarta.annotation.CheckForNull;
 
 import org.sonar.api.CoreProperties;
 import org.sonar.api.config.Configuration;

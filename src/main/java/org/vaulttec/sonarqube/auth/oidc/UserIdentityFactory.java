@@ -20,6 +20,8 @@ package org.vaulttec.sonarqube.auth.oidc;
 import com.nimbusds.openid.connect.sdk.claims.UserInfo;
 import org.sonar.api.server.ServerSide;
 import org.sonar.api.server.authentication.UserIdentity;
+import org.sonar.api.utils.log.Logger;
+import org.sonar.api.utils.log.Loggers;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -34,6 +36,8 @@ import static org.vaulttec.sonarqube.auth.oidc.OidcConfiguration.*;
 @ServerSide
 public class UserIdentityFactory {
 
+  private static final Logger LOGGER = Loggers.get(UserIdentityFactory.class);
+  
   private final OidcConfiguration config;
 
   public UserIdentityFactory(OidcConfiguration config) {
@@ -98,21 +102,87 @@ public class UserIdentityFactory {
       throw new IllegalStateException("Groups claim '" + config.syncGroupsClaimName() + "' is missing in user info - "
           + "make sure your OIDC provider supports this claim in the id token or at the user info endpoint");
     }
-    List<String> groups;
-    if (groupsClaim instanceof List) {
-      groups = (List) groupsClaim;
-    } else { // String
-      if (((String) groupsClaim).contains(",")) {
-        // comma-separated list of groups
-        groups = Stream.of(((String) groupsClaim).split(","))
-            .map(String::trim)
-            .collect(Collectors.toList());
-      } else {
-        // single group
-        groups = Collections.singletonList((String) groupsClaim);
+    
+    List<String> groups = new ArrayList<>();
+    
+    // Safely handle different group claim formats with proper type checking
+    if (groupsClaim instanceof List<?>) {
+      // Handle list format
+      List<?> groupsList = (List<?>) groupsClaim;
+      for (Object group : groupsList) {
+        if (group instanceof String) {
+          // Sanitize and validate group name
+          String groupName = sanitizeGroupName((String) group);
+          if (!groupName.isEmpty()) {
+            groups.add(groupName);
+          }
+        }
       }
+    } else if (groupsClaim instanceof String) {
+      // Handle comma-separated string format
+      String groupsStr = (String) groupsClaim;
+      if (groupsStr.contains(",")) {
+        // comma-separated list of groups
+        groups = Stream.of(groupsStr.split(","))
+            .map(String::trim)
+            .filter(g -> !g.isEmpty())
+            .map(this::sanitizeGroupName)
+            .filter(g -> !g.isEmpty())
+            .collect(Collectors.toList());
+      } else if (!groupsStr.trim().isEmpty()) {
+        // single group - sanitize and validate
+        String groupName = sanitizeGroupName(groupsStr);
+        if (!groupName.isEmpty()) {
+          groups.add(groupName);
+        }
+      }
+    } else if (groupsClaim instanceof String[]) {
+      // Handle string array format
+      for (String group : (String[]) groupsClaim) {
+        if (group != null) {
+          String groupName = sanitizeGroupName(group);
+          if (!groupName.isEmpty()) {
+            groups.add(groupName);
+          }
+        }
+      }
+    } else {
+      LOGGER.warn("Unexpected type for groups claim: {}. Groups will be empty.", 
+          groupsClaim.getClass().getName());
     }
+    
+    // Limit number of groups to prevent potential DoS
+    if (groups.size() > 100) {
+      LOGGER.warn("Large number of groups detected ({}). Limiting to 100.", groups.size());
+      groups = groups.subList(0, 100);
+    }
+    
     return new HashSet<>(groups);
+  }
+  
+  /**
+   * Sanitizes group names to prevent injection attacks
+   * 
+   * @param groupName Raw group name from the IdP
+   * @return Sanitized group name safe for use in SonarQube
+   */
+  private String sanitizeGroupName(String groupName) {
+    if (groupName == null) {
+      return "";
+    }
+    
+    // Trim whitespace
+    String trimmed = groupName.trim();
+    
+    // Basic validation - implement appropriate rules based on SonarQube requirements
+    if (trimmed.length() > 255) {
+      // Prevent extremely long group names
+      return trimmed.substring(0, 255);
+    }
+    
+    // Could add more validation as needed
+    
+    return trimmed;
   }
 
 }

@@ -29,7 +29,7 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.Collections;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 
 import com.nimbusds.jose.util.JSONObjectUtils;
 import com.nimbusds.oauth2.sdk.AuthorizationCode;
